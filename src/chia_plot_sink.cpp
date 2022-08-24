@@ -37,6 +37,7 @@ static bool g_force_shutdown = false;
 
 static std::mutex g_mutex;
 static std::map<uint64_t, std::shared_ptr<std::thread>> g_threads;
+static std::map<std::string, uint64_t> g_reserved;
 
 
 inline
@@ -100,15 +101,17 @@ void trigger_shutdown(int sig)
 }
 
 static
-void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const std::string& dst_path)
+void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const std::string& dst_path, const std::string& file_name)
 {
-	auto* file = fopen(dst_path.c_str(), "wb");
+	const auto file_path = dst_path + (!dst_path.empty() && dst_path.back() != '/' ? "/" : "") + file_name;
+
+	auto* file = fopen(file_path.c_str(), "wb");
 	if(file) {
 		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cout << "Started copy to " << dst_path << " (" << num_bytes / pow(1024, 3) << " GiB)" << std::endl;
+		std::cout << "Started copy to " << file_path << " (" << num_bytes / pow(1024, 3) << " GiB)" << std::endl;
 	} else {
 		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cerr << "fopen('" << dst_path << "') failed with: " << strerror(errno) << std::endl;
+		std::cerr << "fopen('" << file_path << "') failed with: " << strerror(errno) << std::endl;
 	}
 	const auto time_begin = get_time_millis();
 
@@ -128,7 +131,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 		if(fwrite(buffer, 1, num_read, file) != num_read)
 		{
 			std::lock_guard<std::mutex> lock(g_mutex);
-			std::cerr << "fwrite('" << dst_path << "') failed with: " << strerror(errno) << std::endl;
+			std::cerr << "fwrite('" << file_path << "') failed with: " << strerror(errno) << std::endl;
 			break;
 		}
 	}
@@ -137,14 +140,14 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 	while(file && fclose(file)) {
 		{
 			std::lock_guard<std::mutex> lock(g_mutex);
-			std::cerr << "fclose('" << dst_path << "') failed with: " << strerror(errno) << std::endl;
+			std::cerr << "fclose('" << file_path << "') failed with: " << strerror(errno) << std::endl;
 		}
 		std::this_thread::sleep_for(std::chrono::seconds(60));
 	}
 	if(num_left) {
 		std::remove(dst_path.c_str());
 		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cerr << "Deleted " << dst_path << std::endl;
+		std::cerr << "Deleted " << file_path << std::endl;
 	}
 	{
 		std::lock_guard<std::mutex> lock(g_mutex);
@@ -153,9 +156,11 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 		}
 		g_threads.erase(job);
 
+		g_reserved[dst_path] -= num_bytes;
+
 		if(!num_left) {
 			const auto elapsed = (get_time_millis() - time_begin) / 1e3;
-			std::cout << "Finished copy to " << dst_path << ", took " << elapsed << " sec, "
+			std::cout << "Finished copy to " << file_path << ", took " << elapsed << " sec, "
 					<< num_bytes / pow(1024, 2) / elapsed << " MB/s" << std::endl;
 		}
 	}
@@ -234,10 +239,13 @@ int main(int argc, char** argv)
 				std::shuffle(dirs.begin(), dirs.end(), rand_engine);
 
 				const std::string* out = nullptr;
-				for(const auto& dir : dirs) {
-					if(std::experimental::filesystem::space(dir).free > file_size + 4096) {
-						out = &dir;
-						break;
+				{
+					std::lock_guard<std::mutex> lock(g_mutex);
+					for(const auto& dir : dirs) {
+						if(std::experimental::filesystem::space(dir).free > g_reserved[dir] + file_size + 4096) {
+							out = &dir;
+							break;
+						}
 					}
 				}
 				if(!out) {
@@ -255,10 +263,12 @@ int main(int argc, char** argv)
 				std::vector<char> file_name(file_name_len);
 				recv_bytes(file_name.data(), fd, file_name_len);
 
-				const auto file_path = *out + '/' + std::string(file_name.data(), file_name.size());
+				const auto dst_path = *out;
 				{
 					std::lock_guard<std::mutex> lock(g_mutex);
-					g_threads[job_counter] = std::make_shared<std::thread>(&copy_func, job_counter, fd, file_size, file_path);
+					g_reserved[dst_path] += file_size;
+					g_threads[job_counter] = std::make_shared<std::thread>(&copy_func,
+							job_counter, fd, file_size, dst_path, std::string(file_name.data(), file_name.size()));
 				}
 				job_counter++;
 			}
