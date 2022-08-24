@@ -80,6 +80,8 @@ void trigger_shutdown(int sig)
 	if(g_force_shutdown) {
 		::exit(-4);
 	}
+	std::cout << std::endl;
+
 	g_do_run = false;
 	g_force_shutdown = true;
 
@@ -173,7 +175,7 @@ int main(int argc, char** argv)
 
 	const auto args = options.parse(argc, argv);
 
-	if(args.count("help") || argc <= 1) {
+	if(args.count("help") || dir_list.empty()) {
 		std::cout << options.help({""}) << std::endl;
 		return 0;
 	}
@@ -211,6 +213,10 @@ int main(int argc, char** argv)
 		::sockaddr_in addr = {};
 		::socklen_t addr_len = 0;
 		const int fd = ::accept(g_server, (::sockaddr*)&addr, &addr_len);
+		if(!g_do_run) {
+			::close(fd);
+			break;
+		}
 		if(fd >= 0) {
 			try {
 				uint64_t file_size = 0;
