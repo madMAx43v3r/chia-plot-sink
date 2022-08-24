@@ -60,7 +60,7 @@ inline
 }
 
 inline
-void read_bytes(void* dst, const int fd, const size_t num_bytes)
+void recv_bytes(void* dst, const int fd, const size_t num_bytes)
 {
 	auto num_left = num_bytes;
 	auto* dst_= (uint8_t*)dst;
@@ -71,6 +71,14 @@ void read_bytes(void* dst, const int fd, const size_t num_bytes)
 		}
 		num_left -= num_read;
 		dst_ += num_read;
+	}
+}
+
+inline
+void send_bytes(const int fd, const void* src, const size_t num_bytes)
+{
+	if(::send(fd, src, num_bytes, 0) != num_bytes) {
+		throw std::runtime_error("send() failed with: " + std::string(strerror(errno)));
 	}
 }
 
@@ -220,7 +228,7 @@ int main(int argc, char** argv)
 		if(fd >= 0) {
 			try {
 				uint64_t file_size = 0;
-				read_bytes(&file_size, fd, 8);
+				recv_bytes(&file_size, fd, 8);
 
 				auto dirs = dir_list;
 				std::shuffle(dirs.begin(), dirs.end(), rand_engine);
@@ -234,19 +242,18 @@ int main(int argc, char** argv)
 				}
 				if(!out) {
 					const char cmd = 0;
-					::write(fd, &cmd, 1);
-
+					send_bytes(fd, &cmd, 1);
 					throw std::runtime_error("no space left for " + std::to_string(file_size) + " bytes");
 				}
 				{
 					const char cmd = 1;
-					::write(fd, &cmd, 1);
+					send_bytes(fd, &cmd, 1);
 				}
 				uint16_t file_name_len = 0;
-				read_bytes(&file_name_len, fd, 2);
+				recv_bytes(&file_name_len, fd, 2);
 
 				std::vector<char> file_name(file_name_len);
-				read_bytes(file_name.data(), fd, file_name_len);
+				recv_bytes(file_name.data(), fd, file_name_len);
 
 				const auto file_path = *out + '/' + std::string(file_name.data(), file_name.size());
 				{
