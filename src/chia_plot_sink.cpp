@@ -104,7 +104,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 	}
 	const auto time_begin = get_time_millis();
 
-	char buffer[64 * 1024] = {};
+	char buffer[256 * 1024] = {};
 	size_t num_left = num_bytes;
 
 	while(file && num_left)
