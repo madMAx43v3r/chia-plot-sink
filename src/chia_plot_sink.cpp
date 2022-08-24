@@ -69,6 +69,8 @@ void recv_bytes(void* dst, const int fd, const size_t num_bytes)
 		const auto num_read = ::recv(fd, dst_, num_left, 0);
 		if(num_read < 0) {
 			throw std::runtime_error("recv() failed with: " + std::string(strerror(errno)));
+		} else if(num_read == 0) {
+			throw std::runtime_error("recv() failed with: EOF");
 		}
 		num_left -= num_read;
 		dst_ += num_read;
