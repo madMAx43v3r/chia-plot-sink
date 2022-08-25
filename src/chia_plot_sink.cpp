@@ -106,14 +106,15 @@ static
 void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const std::string& dst_path, const std::string& file_name)
 {
 	const auto file_path = dst_path + (!dst_path.empty() && dst_path.back() != '/' ? "/" : "") + file_name;
+	const auto tmp_file_path = file_path + ".tmp";
 
-	auto* file = fopen(file_path.c_str(), "wb");
+	auto* file = fopen(tmp_file_path.c_str(), "wb");
 	if(file) {
 		std::lock_guard<std::mutex> lock(g_mutex);
 		std::cout << "Started copy to " << file_path << " (" << num_bytes / pow(1024, 3) << " GiB)" << std::endl;
 	} else {
 		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cerr << "fopen('" << file_path << "') failed with: " << strerror(errno) << std::endl;
+		std::cerr << "fopen('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
 	}
 	const auto time_begin = get_time_millis();
 
@@ -133,7 +134,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 		if(fwrite(buffer, 1, num_read, file) != num_read)
 		{
 			std::lock_guard<std::mutex> lock(g_mutex);
-			std::cerr << "fwrite('" << file_path << "') failed with: " << strerror(errno) << std::endl;
+			std::cerr << "fwrite('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
 			break;
 		}
 	}
@@ -142,14 +143,19 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 	while(file && fclose(file)) {
 		{
 			std::lock_guard<std::mutex> lock(g_mutex);
-			std::cerr << "fclose('" << file_path << "') failed with: " << strerror(errno) << std::endl;
+			std::cerr << "fclose('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
 		}
 		std::this_thread::sleep_for(std::chrono::seconds(60));
 	}
 	if(num_left) {
 		std::remove(dst_path.c_str());
 		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cerr << "Deleted " << file_path << std::endl;
+		std::cerr << "Deleted " << tmp_file_path << std::endl;
+	} else {
+		if(std::rename(tmp_file_path.c_str(), file_path.c_str())) {
+			std::lock_guard<std::mutex> lock(g_mutex);
+			std::cerr << "rename('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
+		}
 	}
 	{
 		std::lock_guard<std::mutex> lock(g_mutex);
