@@ -128,6 +128,10 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 			std::lock_guard<std::mutex> lock(g_mutex);
 			std::cerr << "recv() failed with: " << strerror(errno) << std::endl;
 			break;
+		} else if(num_read == 0) {
+			std::lock_guard<std::mutex> lock(g_mutex);
+			std::cerr << "recv() failed with: EOF" << std::endl;
+			break;
 		}
 		num_left -= num_read;
 
