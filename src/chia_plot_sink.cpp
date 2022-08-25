@@ -205,7 +205,7 @@ int main(int argc, char** argv)
 		return 0;
 	}
 	for(const auto& dir : dir_list) {
-		std::cout << "Final Directory: " << dir << " (" << int(std::experimental::filesystem::space(dir).free / pow(1024, 3)) << " GiB free)" << std::endl;
+		std::cout << "Final Directory: " << dir << " (" << int(std::experimental::filesystem::space(dir).available / pow(1024, 3)) << " GiB free)" << std::endl;
 	}
 
 	// create server socket
@@ -254,7 +254,7 @@ int main(int argc, char** argv)
 				{
 					std::lock_guard<std::mutex> lock(g_mutex);
 					for(const auto& dir : dirs) {
-						if(std::experimental::filesystem::space(dir).free > g_reserved[dir] + file_size + 4096) {
+						if(std::experimental::filesystem::space(dir).available > g_reserved[dir] + file_size + 4096) {
 							out = &dir;
 							break;
 						}
