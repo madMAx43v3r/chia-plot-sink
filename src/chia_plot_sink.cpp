@@ -247,15 +247,37 @@ int main(int argc, char** argv)
 				uint64_t file_size = 0;
 				recv_bytes(&file_size, fd, 8);
 
-				auto dirs = dir_list;
-				std::shuffle(dirs.begin(), dirs.end(), rand_engine);
-
-				const std::string* out = nullptr;
+				std::shared_ptr<std::string> out;
 				{
 					std::lock_guard<std::mutex> lock(g_mutex);
+
+					// first get drives which have no active copy operations
+					std::vector<std::string> dirs;
+					for(const auto& dir : dir_list) {
+						if(g_reserved[dir] == 0) {
+							dirs.push_back(dir);
+						}
+					}
+					std::shuffle(dirs.begin(), dirs.end(), rand_engine);
+
+					// append drives which are already busy
+					{
+						std::vector<std::string> tmp;
+						for(const auto& dir : dir_list) {
+							if(g_reserved[dir] > 0) {
+								tmp.push_back(dir);
+							}
+						}
+						std::sort(tmp.begin(), tmp.end(), [](const std::string& L, const std::string& R) -> bool {
+							return g_reserved[L] < g_reserved[R];
+						});
+						dirs.insert(dirs.end(), tmp.begin(), tmp.end());
+					}
+
+					// select a drive with enough space available
 					for(const auto& dir : dirs) {
 						if(std::experimental::filesystem::space(dir).available > g_reserved[dir] + file_size + 4096) {
-							out = &dir;
+							out = std::make_shared<std::string>(dir);
 							break;
 						}
 					}
