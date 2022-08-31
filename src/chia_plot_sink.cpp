@@ -13,6 +13,7 @@
 #include <mutex>
 #include <thread>
 #include <map>
+#include <set>
 #include <chrono>
 #include <csignal>
 #include <cmath>
@@ -38,6 +39,7 @@ static bool g_force_shutdown = false;
 static std::mutex g_mutex;
 static std::map<uint64_t, std::shared_ptr<std::thread>> g_threads;
 static std::map<std::string, uint64_t> g_reserved;
+static std::set<std::string> g_failed_drives;
 
 
 inline
@@ -108,6 +110,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 	const auto file_path = dst_path + (!dst_path.empty() && dst_path.back() != '/' ? "/" : "") + file_name;
 	const auto tmp_file_path = file_path + ".tmp";
 
+	bool is_drive_fail = false;
 	auto* file = fopen(tmp_file_path.c_str(), "wb");
 	if(file) {
 		std::lock_guard<std::mutex> lock(g_mutex);
@@ -115,6 +118,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 	} else {
 		std::lock_guard<std::mutex> lock(g_mutex);
 		std::cerr << "fopen('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
+		is_drive_fail = true;
 	}
 	const auto time_begin = get_time_millis();
 
@@ -139,17 +143,16 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 		{
 			std::lock_guard<std::mutex> lock(g_mutex);
 			std::cerr << "fwrite('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
+			is_drive_fail = true;
 			break;
 		}
 	}
 	::close(fd);
 
-	while(file && fclose(file)) {
-		{
-			std::lock_guard<std::mutex> lock(g_mutex);
-			std::cerr << "fclose('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
-		}
-		std::this_thread::sleep_for(std::chrono::seconds(60));
+	if(file && fclose(file)) {
+		std::lock_guard<std::mutex> lock(g_mutex);
+		std::cerr << "fclose('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
+		is_drive_fail = true;
 	}
 	if(num_left) {
 		std::remove(dst_path.c_str());
@@ -168,6 +171,9 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 		}
 		g_threads.erase(job);
 
+		if(is_drive_fail) {
+			g_failed_drives.insert(dst_path);
+		}
 		g_reserved[dst_path] -= num_bytes;
 
 		if(!num_left) {
@@ -254,7 +260,7 @@ int main(int argc, char** argv)
 					// first get drives which have no active copy operations
 					std::vector<std::string> dirs;
 					for(const auto& dir : dir_list) {
-						if(g_reserved[dir] == 0) {
+						if(!g_failed_drives.count(dir) && g_reserved[dir] == 0) {
 							dirs.push_back(dir);
 						}
 					}
@@ -264,7 +270,7 @@ int main(int argc, char** argv)
 					{
 						std::vector<std::string> tmp;
 						for(const auto& dir : dir_list) {
-							if(g_reserved[dir] > 0) {
+							if(!g_failed_drives.count(dir) && g_reserved[dir] > 0) {
 								tmp.push_back(dir);
 							}
 						}
@@ -329,6 +335,9 @@ int main(int argc, char** argv)
 	}
 	for(const auto& entry : threads) {
 		entry.second->join();
+	}
+	for(const auto& path : g_failed_drives) {
+		std::cout << "Failed drive: " << path << std::endl;
 	}
 	return 0;
 }
