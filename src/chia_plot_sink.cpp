@@ -19,6 +19,7 @@
 #include <cmath>
 #include <random>
 #include <algorithm>
+#include <condition_variable>
 
 #include <experimental/filesystem>
 
@@ -37,8 +38,10 @@ static bool g_do_run = true;
 static bool g_force_shutdown = false;
 
 static std::mutex g_mutex;
+static std::condition_variable g_signal;
 static std::map<uint64_t, std::shared_ptr<std::thread>> g_threads;
 static std::map<std::string, uint64_t> g_reserved;
+static std::map<std::string, int64_t> g_num_active;
 static std::set<std::string> g_failed_drives;
 
 
@@ -97,6 +100,7 @@ void trigger_shutdown(int sig)
 
 	g_do_run = false;
 	g_force_shutdown = true;
+	g_signal.notify_all();
 
 	const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
 	::sockaddr_in addr = get_sockaddr_byname("localhost", g_port);
@@ -175,6 +179,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 			g_failed_drives.insert(dst_path);
 		}
 		g_reserved[dst_path] -= num_bytes;
+		g_num_active[dst_path]--;
 
 		if(!num_left) {
 			const auto elapsed = (get_time_millis() - time_begin) / 1e3;
@@ -182,6 +187,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 					<< num_bytes / pow(1024, 2) / elapsed << " MB/s" << std::endl;
 		}
 	}
+	g_signal.notify_all();
 }
 
 
@@ -195,10 +201,12 @@ int main(int argc, char** argv)
 		"Usage: cuda_plot_sink -- /mnt/disk0/ /mnt/disk1/ ...\n"
 	);
 
+	int max_num_active = 1;
 	std::vector<std::string> dir_list;
 
 	options.allow_unrecognised_options().add_options()(
 		"p, port", "Port to listen on (default = 1337)", cxxopts::value<int>(g_port))(
+		"r, parallel", "Maximum number of parallel copies to same drive (default = 1, infinite = -1)", cxxopts::value<int>(max_num_active))(
 		"d, destination", "List of destination folders", cxxopts::value<std::vector<std::string>>(dir_list))(
 		"help", "Print help");
 
@@ -254,28 +262,32 @@ int main(int argc, char** argv)
 				recv_bytes(&file_size, fd, 8);
 
 				std::shared_ptr<std::string> out;
-				{
-					std::lock_guard<std::mutex> lock(g_mutex);
+				while(!out) {
+					std::unique_lock<std::mutex> lock(g_mutex);
 
 					// first get drives which have no active copy operations
 					std::vector<std::string> dirs;
 					for(const auto& dir : dir_list) {
-						if(!g_failed_drives.count(dir) && g_reserved[dir] == 0) {
+						if(!g_failed_drives.count(dir) && g_num_active[dir] == 0) {
 							dirs.push_back(dir);
 						}
 					}
-					std::shuffle(dirs.begin(), dirs.end(), rand_engine);
+					// sort by free space
+					std::sort(dirs.begin(), dirs.end(), [](const std::string& L, const std::string& R) -> bool {
+						return std::experimental::filesystem::space(L).available > std::experimental::filesystem::space(R).available;
+					});
 
 					// append drives which are already busy
 					{
 						std::vector<std::string> tmp;
 						for(const auto& dir : dir_list) {
-							if(!g_failed_drives.count(dir) && g_reserved[dir] > 0) {
+							const auto num_active = g_num_active[dir];
+							if(!g_failed_drives.count(dir) && num_active > 0 && (num_active < max_num_active || max_num_active < 0)) {
 								tmp.push_back(dir);
 							}
 						}
 						std::sort(tmp.begin(), tmp.end(), [](const std::string& L, const std::string& R) -> bool {
-							return g_reserved[L] < g_reserved[R];
+							return g_num_active[L] < g_num_active[R];
 						});
 						dirs.insert(dirs.end(), tmp.begin(), tmp.end());
 					}
@@ -287,11 +299,17 @@ int main(int argc, char** argv)
 							break;
 						}
 					}
+					if(!out) {
+						std::cout << "Waiting for previous copy to finish or more space to become available ..." << std::endl;
+						g_signal.wait(lock);
+					}
+					if(!g_do_run) {
+						break;
+					}
 				}
-				if(!out) {
-					const char cmd = 0;
-					send_bytes(fd, &cmd, 1);
-					throw std::runtime_error("no space left for " + std::to_string(file_size) + " bytes");
+				if(!g_do_run) {
+					::close(fd);
+					break;
 				}
 				{
 					const char cmd = 1;
@@ -307,6 +325,7 @@ int main(int argc, char** argv)
 				{
 					std::lock_guard<std::mutex> lock(g_mutex);
 					g_reserved[dst_path] += file_size;
+					g_num_active[dst_path]++;
 					g_threads[job_counter] = std::make_shared<std::thread>(&copy_func,
 							job_counter, fd, file_size, dst_path, std::string(file_name.data(), file_name.size()));
 				}
