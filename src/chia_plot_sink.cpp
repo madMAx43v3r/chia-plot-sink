@@ -155,7 +155,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 		is_drive_fail = true;
 	}
 	if(num_left) {
-		std::remove(dst_path.c_str());
+		std::remove(tmp_file_path.c_str());
 		std::lock_guard<std::mutex> lock(g_mutex);
 		std::cerr << "Deleted " << tmp_file_path << std::endl;
 	} else {
