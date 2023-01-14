@@ -8,5 +8,7 @@ find_package(Threads REQUIRED)
 include_directories(include)
 
 add_executable(chia_plot_sink src/chia_plot_sink.cpp)
+add_executable(chia_plot_copy src/chia_plot_copy.cpp)
 
 target_link_libraries(chia_plot_sink stdc++fs Threads::Threads)
+target_link_libraries(chia_plot_copy stdc++fs)
