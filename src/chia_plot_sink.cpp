@@ -21,15 +21,11 @@
 #include <algorithm>
 #include <condition_variable>
 
+#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
 #include <experimental/filesystem>
 
-#include <netdb.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/tcp.h>
-
 #include <cxxopts.hpp>
+#include <stdiox.hpp>
 
 
 static int g_port = 1337;
@@ -50,6 +46,17 @@ int64_t get_time_millis() {
 	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+#ifdef _WIN32
+inline
+std::string get_socket_error_text() {
+	return std::to_string(WSAGetLastError());
+}
+#else
+std::string get_socket_error_text() {
+	return std::string(std::strerror(errno)) + " (" + std::to_string(errno) + ")";
+}
+#endif
+
 inline
 ::sockaddr_in get_sockaddr_byname(const std::string& endpoint, int port)
 {
@@ -69,7 +76,7 @@ inline
 void recv_bytes(void* dst, const int fd, const size_t num_bytes)
 {
 	auto num_left = num_bytes;
-	auto* dst_= (uint8_t*)dst;
+	auto* dst_= (char*)dst;
 	while(num_left > 0) {
 		const auto num_read = ::recv(fd, dst_, num_left, 0);
 		if(num_read < 0) {
@@ -85,7 +92,7 @@ void recv_bytes(void* dst, const int fd, const size_t num_bytes)
 inline
 void send_bytes(const int fd, const void* src, const size_t num_bytes)
 {
-	if(::send(fd, src, num_bytes, 0) != num_bytes) {
+	if(::send(fd, (const char*)src, num_bytes, 0) != num_bytes) {
 		throw std::runtime_error("send() failed with: " + std::string(strerror(errno)));
 	}
 }
@@ -105,7 +112,7 @@ void trigger_shutdown(int sig)
 	const int sock = ::socket(AF_INET, SOCK_STREAM, 0);
 	::sockaddr_in addr = get_sockaddr_byname("localhost", g_port);
 	::connect(sock, (::sockaddr*)&addr, sizeof(addr));
-	::close(sock);
+	CLOSESOCKET(sock);
 }
 
 static
@@ -131,7 +138,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 
 	while(file && num_left)
 	{
-		const auto num_read = ::recv(fd, buffer, std::min(num_left, sizeof(buffer)), 0);
+		const auto num_read = ::recv(fd, buffer, std::min<size_t>(num_left, sizeof(buffer)), 0);
 		if(num_read < 0) {
 			std::lock_guard<std::mutex> lock(g_mutex);
 			std::cerr << "recv() failed with: " << strerror(errno) << std::endl;
@@ -151,7 +158,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 			break;
 		}
 	}
-	::close(fd);
+	CLOSESOCKET(fd);
 
 	if(file && fclose(file)) {
 		std::lock_guard<std::mutex> lock(g_mutex);
@@ -191,8 +198,19 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 }
 
 
-int main(int argc, char** argv)
+int main(int argc, char** argv) try
 {
+#ifdef _WIN32
+	{
+		WSADATA data;
+		const int wsaret = WSAStartup(MAKEWORD(1, 1), &data);
+		if(wsaret != 0) {
+			std::cerr << "WSAStartup() failed with error: " << wsaret << "\n";
+			exit(-1);
+		}
+	}
+#endif
+	
 	std::signal(SIGINT, trigger_shutdown);
 	std::signal(SIGTERM, trigger_shutdown);
 
@@ -225,22 +243,22 @@ int main(int argc, char** argv)
 	// create server socket
 	g_server = ::socket(AF_INET, SOCK_STREAM, 0);
 	if(g_server < 0) {
-		throw std::runtime_error("socket() failed with: " + std::string(strerror(errno)));
+		throw std::runtime_error("socket() failed with: " + get_socket_error_text());
 	}
 	{
 		int enable = 1;
 		if(::setsockopt(g_server, SOL_SOCKET, SO_REUSEADDR, (char*)&enable, sizeof(int)) < 0) {
-			std::cerr << "setsockopt(SO_REUSEADDR) failed with: " << strerror(errno);
+			std::cerr << "setsockopt(SO_REUSEADDR) failed with: " << get_socket_error_text() << std::endl;
 		}
 	}
 	{
 		::sockaddr_in addr = get_sockaddr_byname("0.0.0.0", g_port);
 		if(::bind(g_server, (::sockaddr*)&addr, sizeof(addr)) < 0) {
-			throw std::runtime_error("bind() failed with: " + std::string(strerror(errno)));
+			throw std::runtime_error("bind() failed with: " + get_socket_error_text());
 		}
 	}
 	if(::listen(g_server, 10) < 0) {
-		throw std::runtime_error("listen() failed with: " + std::string(strerror(errno)));
+		throw std::runtime_error("listen() failed with: " + get_socket_error_text());
 	}
 	std::cout << "Listening on port " << g_port << std::endl;
 
@@ -249,11 +267,9 @@ int main(int argc, char** argv)
 
 	while(g_do_run)
 	{
-		::sockaddr_in addr = {};
-		::socklen_t addr_len = 0;
-		const int fd = ::accept(g_server, (::sockaddr*)&addr, &addr_len);
+		const int fd = ::accept(g_server, 0, 0);
 		if(!g_do_run) {
-			::close(fd);
+			CLOSESOCKET(fd);
 			break;
 		}
 		if(fd >= 0) {
@@ -308,7 +324,7 @@ int main(int argc, char** argv)
 					}
 				}
 				if(!g_do_run) {
-					::close(fd);
+					CLOSESOCKET(fd);
 					break;
 				}
 				{
@@ -332,15 +348,16 @@ int main(int argc, char** argv)
 				job_counter++;
 			}
 			catch(const std::exception& ex) {
-				::close(fd);
+				CLOSESOCKET(fd);
 				std::lock_guard<std::mutex> lock(g_mutex);
 				std::cerr << "accept() failed with: " << ex.what() << std::endl;
 			}
 		} else {
+			std::cerr << "accept() failed with: " << get_socket_error_text() << std::endl;
 			break;
 		}
 	}
-	::close(g_server);
+	CLOSESOCKET(g_server);
 
 	{
 		std::lock_guard<std::mutex> lock(g_mutex);
@@ -358,6 +375,11 @@ int main(int argc, char** argv)
 	for(const auto& path : g_failed_drives) {
 		std::cout << "Failed drive: " << path << std::endl;
 	}
+#ifdef _WIN32
+	WSACleanup();
+#endif
 	return 0;
 }
-
+catch(const std::exception& ex) {
+	std::cerr << "Failed with: " << ex.what() << std::endl;
+}

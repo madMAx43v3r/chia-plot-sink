@@ -7,13 +7,9 @@
 
 #include <mutex>
 #include <string>
-#include <experimental/filesystem>
 
-#include <netdb.h>
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/tcp.h>
+#define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
+#include <experimental/filesystem>
 
 #include <cxxopts.hpp>
 #include <stdiox.hpp>
@@ -21,6 +17,17 @@
 
 size_t g_read_chunk_size = 65536;
 
+
+#ifdef _WIN32
+inline
+std::string get_socket_error_text() {
+	return std::to_string(WSAGetLastError());
+}
+#else
+std::string get_socket_error_text() {
+	return std::string(std::strerror(errno)) + " (" + std::to_string(errno) + ")";
+}
+#endif
 
 ::sockaddr_in get_sockaddr_byname(const std::string& endpoint, int port)
 {
@@ -47,7 +54,7 @@ void recv_bytes(void* dst, const int fd, const size_t num_bytes)
 	while(num_left > 0) {
 		const auto num_read = ::recv(fd, dst_, num_left, 0);
 		if(num_read < 0) {
-			throw std::runtime_error("recv() failed with: " + std::string(strerror(errno)));
+			throw std::runtime_error("recv() failed with: " + get_socket_error_text());
 		} else if(num_read == 0) {
 			throw std::runtime_error("recv() failed with: EOF");
 		}
@@ -59,7 +66,7 @@ void recv_bytes(void* dst, const int fd, const size_t num_bytes)
 void send_bytes(const int fd, const void* src, const size_t num_bytes)
 {
 	if(::send(fd, (const char*)src, num_bytes, 0) != num_bytes) {
-		throw std::runtime_error("send() failed with: " + std::string(strerror(errno)));
+		throw std::runtime_error("send() failed with: " + get_socket_error_text());
 	}
 }
 
@@ -78,11 +85,11 @@ uint64_t send_file(const std::string& src_path, const std::string& dst_host, con
 	try {
 		fd = ::socket(AF_INET, SOCK_STREAM, 0);
 		if(fd < 0) {
-			throw std::runtime_error("socket() failed with: " + std::string(strerror(errno)));
+			throw std::runtime_error("socket() failed with: " + get_socket_error_text());
 		}
 		::sockaddr_in addr = get_sockaddr_byname(dst_host, dst_port);
 		if(::connect(fd, (::sockaddr*)&addr, sizeof(addr)) < 0) {
-			throw std::runtime_error("connect() failed with: " + std::string(strerror(errno)));
+			throw std::runtime_error("connect() failed with: " + get_socket_error_text());
 		}
 		send_bytes(fd, &file_size, 8);
 		{
@@ -132,8 +139,19 @@ uint64_t send_file(const std::string& src_path, const std::string& dst_host, con
 }
 
 
-int main(int argc, char** argv)
+int main(int argc, char** argv) try
 {
+#ifdef _WIN32
+	{
+		WSADATA data;
+		const int wsaret = WSAStartup(MAKEWORD(1, 1), &data);
+		if(wsaret != 0) {
+			std::cerr << "WSAStartup() failed with error: " << wsaret << "\n";
+			exit(-1);
+		}
+	}
+#endif
+
 	cxxopts::Options options("chia_plot_copy",
 		"Copy plots via TCP to a chia_plot_sink.\n\n"
 		"Usage: chia_plot_copy -t <host> -- *.plot ...\n"
@@ -169,6 +187,12 @@ int main(int argc, char** argv)
 			std::remove(file_name.c_str());
 		}
 	}
-
+	
+#ifdef _WIN32
+	WSACleanup();
+#endif
 	return 0;
+}
+catch(const std::exception& ex) {
+	std::cerr << "Failed with: " << ex.what() << std::endl;
 }
