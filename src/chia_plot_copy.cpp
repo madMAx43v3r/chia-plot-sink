@@ -77,7 +77,7 @@ uint64_t send_file(const std::string& src_path, const std::string& dst_host, con
 		throw std::runtime_error("fopen() failed for " + src_path + " (" + std::string(strerror(errno)) + ")");
 	}
 	FSEEK(src, 0, SEEK_END);
-	const uint64_t file_size = ftell(src);
+	const uint64_t file_size = FTELL(src);
 	FSEEK(src, 0, SEEK_SET);
 
 	int fd = -1;

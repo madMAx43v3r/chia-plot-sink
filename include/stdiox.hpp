@@ -15,6 +15,7 @@
 #define WRITE(...) _write(__VA_ARGS__)
 #define LSEEK(...) _lseek(__VA_ARGS__)
 #define FSEEK(...) _fseeki64(__VA_ARGS__)
+#define FTELL(...) ::_ftelli64(__VA_ARGS__)
 #define CLOSESOCKET(...) closesocket(__VA_ARGS__)
 #define O_DIRECT 0
 #define O_RDONLY _O_RDONLY
@@ -31,6 +32,7 @@
 #define WRITE(...) ::write(__VA_ARGS__)
 #define LSEEK(...) ::lseek(__VA_ARGS__)
 #define FSEEK(...) ::fseek(__VA_ARGS__)
+#define FTELL(...) ::ftell(__VA_ARGS__)
 #define CLOSESOCKET(...) ::close(__VA_ARGS__)
 #endif
 
