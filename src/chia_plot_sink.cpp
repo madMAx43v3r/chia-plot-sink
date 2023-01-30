@@ -310,10 +310,19 @@ int main(int argc, char** argv) try
 					}
 
 					// select a drive with enough space available
-					for(const auto& dir : dirs) {
-						if(std::experimental::filesystem::space(dir).available > g_reserved[dir] + file_size + 4096) {
-							out = std::make_shared<std::string>(dir);
-							break;
+					for(const auto& dir : dirs)
+					{
+						if(std::experimental::filesystem::space(dir).available > g_reserved[dir] + file_size + 4096)
+						{
+							const auto prefix = dir + std::experimental::filesystem::path::preferred_separator;
+
+							// check if this folder is disabled
+							if(		!std::experimental::filesystem::exists(prefix + "chia_plot_sink_disable")
+								&&	!std::experimental::filesystem::exists(prefix + "chia_plot_sink_disable.txt"))
+							{
+								out = std::make_shared<std::string>(dir);
+								break;
+							}
 						}
 					}
 					if(!out) {
