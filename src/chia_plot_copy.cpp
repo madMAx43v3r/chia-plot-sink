@@ -7,6 +7,8 @@
 
 #include <mutex>
 #include <string>
+#include <chrono>
+#include <cmath>
 
 #define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
 #include <experimental/filesystem>
@@ -28,6 +30,11 @@ std::string get_socket_error_text() {
 	return std::string(std::strerror(errno)) + " (" + std::to_string(errno) + ")";
 }
 #endif
+
+inline
+int64_t get_time_millis() {
+	return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
 
 ::sockaddr_in get_sockaddr_byname(const std::string& endpoint, int port)
 {
@@ -158,6 +165,7 @@ int main(int argc, char** argv) try
 	);
 
 	int port = 1337;
+	int threads = 10;
 	bool do_remove = false;
 	std::string target = "localhost";
 	std::vector<std::string> file_list;
@@ -166,6 +174,7 @@ int main(int argc, char** argv) try
 		"p, port", "Port to connect to (default = 1337)", cxxopts::value<int>(port))(
 		"d, delete", "Delete files after copy (default = false)", cxxopts::value<bool>(do_remove))(
 		"t, target", "Target hostname / IP address (default = localhost)", cxxopts::value<std::string>(target))(
+		"r, nthreads", "Number of threads (default = 10)", cxxopts::value<int>(port))(
 		"f, files", "List of plot files", cxxopts::value<std::vector<std::string>>(file_list))(
 		"help", "Print help");
 
@@ -178,11 +187,26 @@ int main(int argc, char** argv) try
 		return 0;
 	}
 
-	for(const auto& file_name : file_list)
-	{
-		const auto num_bytes = send_file(file_name, target, port);
-		std::cout << "Sent " << file_name << " (" << num_bytes / 1024 / 1024. << " MiB)" << std::endl;
+	std::mutex mutex;
 
+#pragma omp parallel for num_threads(threads)
+	for(int i = 0; i < int(file_list.size()); ++i)
+	{
+		const auto file_name = file_list[i];
+		const auto time_begin = get_time_millis();
+		{
+			std::lock_guard<std::mutex> lock(mutex);
+			std::cout << "Starting to copy " << file_name << " ..." << std::endl;
+		}
+		const auto num_bytes = send_file(file_name, target, port);
+
+		const auto elapsed = (get_time_millis() - time_begin) / 1e3;
+		{
+			std::lock_guard<std::mutex> lock(mutex);
+			std::cout << "Finished copy of " << file_name
+					<< " (" << num_bytes / 1024 / 1024. << " MiB) took " << elapsed << " sec, "
+					<< num_bytes / pow(1024, 2) / elapsed << " MB/s" << std::endl;
+		}
 		if(do_remove) {
 			std::remove(file_name.c_str());
 		}
