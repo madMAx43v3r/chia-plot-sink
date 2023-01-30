@@ -277,6 +277,7 @@ int main(int argc, char** argv) try
 				uint64_t file_size = 0;
 				recv_bytes(&file_size, fd, 8);
 
+				size_t wait_counter = 0;
 				std::shared_ptr<std::string> out;
 				while(!out) {
 					std::unique_lock<std::mutex> lock(g_mutex);
@@ -316,8 +317,10 @@ int main(int argc, char** argv) try
 						}
 					}
 					if(!out) {
-						std::cout << "Waiting for previous copy to finish or more space to become available ..." << std::endl;
-						g_signal.wait(lock);
+						if(!wait_counter++) {
+							std::cout << "Waiting for previous copy to finish or more space to become available ..." << std::endl;
+						}
+						g_signal.wait_for(lock, std::chrono::seconds(10));
 					}
 					if(!g_do_run) {
 						break;
