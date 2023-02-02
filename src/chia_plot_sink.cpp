@@ -372,17 +372,13 @@ int main(int argc, char** argv) try
 	CLOSESOCKET(g_server);
 
 	{
-		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cout << "Waiting for jobs to finish ..." << std::endl;
-	}
-	decltype(g_threads) threads;
-	{
-		std::lock_guard<std::mutex> lock(g_mutex);
-		threads = g_threads;
-		g_threads.clear();
-	}
-	for(const auto& entry : threads) {
-		entry.second->join();
+		std::unique_lock<std::mutex> lock(g_mutex);
+		if(!g_threads.empty()) {
+			std::cout << "Waiting for jobs to finish ..." << std::endl;
+		}
+		while(!g_threads.empty()) {
+			g_signal.wait(lock);
+		}
 	}
 	for(const auto& path : g_failed_drives) {
 		std::cout << "Failed drive: " << path << std::endl;
