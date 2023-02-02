@@ -198,17 +198,23 @@ int main(int argc, char** argv) try
 			std::lock_guard<std::mutex> lock(mutex);
 			std::cout << "Starting to copy " << file_name << " ..." << std::endl;
 		}
-		const auto num_bytes = send_file(file_name, target, port);
+		try {
+			const auto num_bytes = send_file(file_name, target, port);
 
-		const auto elapsed = (get_time_millis() - time_begin) / 1e3;
-		{
-			std::lock_guard<std::mutex> lock(mutex);
-			std::cout << "Finished copy of " << file_name
-					<< " (" << num_bytes / 1024 / 1024. << " MiB) took " << elapsed << " sec, "
-					<< num_bytes / pow(1024, 2) / elapsed << " MB/s" << std::endl;
+			const auto elapsed = (get_time_millis() - time_begin) / 1e3;
+			{
+				std::lock_guard<std::mutex> lock(mutex);
+				std::cout << "Finished copy of " << file_name
+						<< " (" << num_bytes / 1024 / 1024. << " MiB) took " << elapsed << " sec, "
+						<< num_bytes / pow(1024, 2) / elapsed << " MB/s" << std::endl;
+			}
+			if(do_remove) {
+				std::remove(file_name.c_str());
+			}
 		}
-		if(do_remove) {
-			std::remove(file_name.c_str());
+		catch(const std::exception& ex) {
+			std::lock_guard<std::mutex> lock(mutex);
+			std::cout << "Failed to copy " << file_name << ": " << ex.what() << std::endl;
 		}
 	}
 	
