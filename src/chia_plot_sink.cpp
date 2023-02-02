@@ -283,36 +283,53 @@ int main(int argc, char** argv) try
 					std::unique_lock<std::mutex> lock(g_mutex);
 
 					// first get drives which have no active copy operations
-					std::vector<std::string> dirs;
+					std::vector<std::pair<std::string, uint64_t>> dirs;
 					for(const auto& dir : dir_list) {
 						if(!g_failed_drives.count(dir) && g_num_active[dir] == 0) {
-							dirs.push_back(dir);
+							try {
+								const auto available = std::experimental::filesystem::space(dir).available;
+								if(available > 0) {
+									dirs.emplace_back(dir, available);
+								}
+							} catch(const std::exception& ex) {
+								std::cout << "Failed to get free space for " << dir << " (" << ex.what() << ")" << std::endl;
+							}
 						}
 					}
 					// sort by free space
-					std::sort(dirs.begin(), dirs.end(), [](const std::string& L, const std::string& R) -> bool {
-						return std::experimental::filesystem::space(L).available > std::experimental::filesystem::space(R).available;
-					});
+					std::sort(dirs.begin(), dirs.end(),
+						[](const std::pair<std::string, uint64_t>& L, const std::pair<std::string, uint64_t>& R) -> bool {
+							return L.second > R.second;
+						});
 
 					// append drives which are already busy
 					{
-						std::vector<std::string> tmp;
+						std::vector<std::pair<std::string, uint64_t>> tmp;
 						for(const auto& dir : dir_list) {
 							const auto num_active = g_num_active[dir];
 							if(!g_failed_drives.count(dir) && num_active > 0 && (num_active < max_num_active || max_num_active < 0)) {
-								tmp.push_back(dir);
+								try {
+									const auto available = std::experimental::filesystem::space(dir).available;
+									if(available > 0) {
+										tmp.emplace_back(dir, available);
+									}
+								} catch(...) {
+									// ignore
+								}
 							}
 						}
-						std::sort(tmp.begin(), tmp.end(), [](const std::string& L, const std::string& R) -> bool {
-							return g_num_active[L] < g_num_active[R];
-						});
+						std::sort(tmp.begin(), tmp.end(),
+							[](const std::pair<std::string, uint64_t>& L, const std::pair<std::string, uint64_t>& R) -> bool {
+								return g_num_active[L.first] < g_num_active[R.first];
+							});
 						dirs.insert(dirs.end(), tmp.begin(), tmp.end());
 					}
 
 					// select a drive with enough space available
-					for(const auto& dir : dirs)
+					for(const auto& entry : dirs)
 					{
-						if(std::experimental::filesystem::space(dir).available > g_reserved[dir] + file_size + 4096)
+						const auto& dir = entry.first;
+						if(entry.second > g_reserved[dir] + file_size + 4096)
 						{
 							const auto prefix = dir + std::experimental::filesystem::path::preferred_separator;
 
