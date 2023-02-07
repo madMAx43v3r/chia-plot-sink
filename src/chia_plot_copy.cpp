@@ -205,7 +205,7 @@ int main(int argc, char** argv) try
 			{
 				std::lock_guard<std::mutex> lock(mutex);
 				std::cout << "Finished copy of " << file_name
-						<< " (" << num_bytes / 1024 / 1024. << " MiB) took " << elapsed << " sec, "
+						<< " (" << num_bytes / 1024 / 1024 / 1024. << " GiB) took " << elapsed << " sec, "
 						<< num_bytes / pow(1024, 2) / elapsed << " MB/s" << std::endl;
 			}
 			if(do_remove) {
