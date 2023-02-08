@@ -331,7 +331,7 @@ int main(int argc, char** argv) try
 						const auto& dir = entry.first;
 						if(entry.second > g_reserved[dir] + file_size + 4096)
 						{
-							const auto prefix = dir + std::experimental::filesystem::path::preferred_separator;
+							const auto prefix = dir + char(std::experimental::filesystem::path::preferred_separator);
 
 							// check if this folder is disabled
 							if(		!std::experimental::filesystem::exists(prefix + "chia_plot_sink_disable")
