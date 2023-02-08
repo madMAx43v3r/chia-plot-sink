@@ -174,7 +174,7 @@ int main(int argc, char** argv) try
 		"p, port", "Port to connect to (default = 1337)", cxxopts::value<int>(port))(
 		"d, delete", "Delete files after copy (default = false)", cxxopts::value<bool>(do_remove))(
 		"t, target", "Target hostname / IP address (default = localhost)", cxxopts::value<std::string>(target))(
-		"r, nthreads", "Number of threads (default = 10)", cxxopts::value<int>(port))(
+		"r, nthreads", "Number of threads (default = 10)", cxxopts::value<int>(threads))(
 		"f, files", "List of plot files", cxxopts::value<std::vector<std::string>>(file_list))(
 		"help", "Print help");
 
