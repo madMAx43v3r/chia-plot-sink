@@ -257,7 +257,7 @@ int main(int argc, char** argv) try
 			throw std::runtime_error("bind() failed with: " + get_socket_error_text());
 		}
 	}
-	if(::listen(g_server, 10) < 0) {
+	if(::listen(g_server, 1000) < 0) {
 		throw std::runtime_error("listen() failed with: " + get_socket_error_text());
 	}
 	std::cout << "Listening on port " << g_port << std::endl;
