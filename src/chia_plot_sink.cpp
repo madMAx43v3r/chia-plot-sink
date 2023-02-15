@@ -213,6 +213,7 @@ int main(int argc, char** argv) try
 	
 	std::signal(SIGINT, trigger_shutdown);
 	std::signal(SIGTERM, trigger_shutdown);
+	std::signal(SIGPIPE, SIG_IGN);
 
 	cxxopts::Options options("chia_plot_sink",
 		"Final copy engine to receive plots from one or more plotters via TCP and distribute to multiple disks in parallel.\n\n"
