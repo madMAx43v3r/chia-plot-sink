@@ -142,12 +142,12 @@ uint64_t send_file(const std::string& src_path, const std::string& dst_host, con
 		}
 #else
 		while(true) {
-			const auto num_bytes = ::sendfile(fd, fileno(src), NULL, g_read_chunk_size * 16);
+			const auto num_bytes = ::sendfile(fd, fileno(src), NULL, g_read_chunk_size * 1024);
 			if(num_bytes < 0) {
 				throw std::runtime_error("sendfile() failed with: " + get_socket_error_text());
 			}
 			total_bytes += num_bytes;
-			if(num_bytes < g_read_chunk_size * 16) {
+			if(num_bytes < g_read_chunk_size * 1024) {
 				break;
 			}
 		}
