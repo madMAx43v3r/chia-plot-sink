@@ -143,14 +143,18 @@ uint64_t send_file(const std::string& src_path, const std::string& dst_host, con
 #else
 		const auto chunk_size = g_read_chunk_size * 1024;
 		while(true) {
-			const auto num_bytes = ::sendfile(fd, ::fileno(src), NULL, chunk_size);
-			if(num_bytes < 0) {
+			const auto num_bytes = std::min(chunk_size, file_size - total_bytes);
+			const auto ret = ::sendfile(fd, ::fileno(src), NULL, num_bytes);
+			if(ret < 0) {
 				throw std::runtime_error("sendfile() failed with: " + get_socket_error_text());
 			}
 			total_bytes += num_bytes;
 			if(num_bytes < chunk_size) {
 				break;
 			}
+		}
+		if(total_bytes != file_size) {
+			throw std::runtime_error("sendfile() failed with: remote EOF (" + std::to_string(total_bytes) + " / " + std::to_string(file_size) + ")");
 		}
 #endif
 	} catch(...) {
