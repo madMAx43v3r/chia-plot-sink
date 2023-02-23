@@ -28,6 +28,7 @@
 #include <stdiox.hpp>
 
 
+static std::string g_addr = "0.0.0.0";
 static int g_port = 1337;
 static int g_server = -1;
 static bool g_do_run = true;
@@ -226,6 +227,7 @@ int main(int argc, char** argv) try
 	std::vector<std::string> dir_list;
 
 	options.allow_unrecognised_options().add_options()(
+		"B, address", "Address to listen on (default = 0.0.0.0)", cxxopts::value<std::string>(g_addr))(
 		"p, port", "Port to listen on (default = 1337)", cxxopts::value<int>(g_port))(
 		"r, parallel", "Maximum number of parallel copies to same drive (default = 1, infinite = -1)", cxxopts::value<int>(max_num_active))(
 		"d, destination", "List of destination folders", cxxopts::value<std::vector<std::string>>(dir_list))(
@@ -255,7 +257,7 @@ int main(int argc, char** argv) try
 		}
 	}
 	{
-		::sockaddr_in addr = get_sockaddr_byname("0.0.0.0", g_port);
+		::sockaddr_in addr = get_sockaddr_byname(g_addr, g_port);
 		if(::bind(g_server, (::sockaddr*)&addr, sizeof(addr)) < 0) {
 			throw std::runtime_error("bind() failed with: " + get_socket_error_text());
 		}
@@ -263,7 +265,7 @@ int main(int argc, char** argv) try
 	if(::listen(g_server, 1000) < 0) {
 		throw std::runtime_error("listen() failed with: " + get_socket_error_text());
 	}
-	std::cout << "Listening on port " << g_port << std::endl;
+	std::cout << "Listening on " << g_addr << ":" << g_port << std::endl;
 
 	uint64_t job_counter = 0;
 	std::default_random_engine rand_engine;
