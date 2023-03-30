@@ -335,13 +335,16 @@ int main(int argc, char** argv) try
 						if(entry.second > g_reserved[dir] + file_size + 4096)
 						{
 							const auto prefix = dir + char(std::experimental::filesystem::path::preferred_separator);
-
-							// check if this folder is disabled
-							if(		!std::experimental::filesystem::exists(prefix + "chia_plot_sink_disable")
-								&&	!std::experimental::filesystem::exists(prefix + "chia_plot_sink_disable.txt"))
-							{
-								out = std::make_shared<std::string>(dir);
-								break;
+							try {
+								// check if this folder is disabled
+								if(		!std::experimental::filesystem::exists(prefix + "chia_plot_sink_disable")
+									&&	!std::experimental::filesystem::exists(prefix + "chia_plot_sink_disable.txt"))
+								{
+									out = std::make_shared<std::string>(dir);
+									break;
+								}
+							} catch(...) {
+								// ignore
 							}
 						}
 					}
