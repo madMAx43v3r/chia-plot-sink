@@ -1,0 +1,62 @@
+name: Build Windows Binaries
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Windows Binaries on Windows Latest
+    runs-on: windows-latest
+
+    steps:
+    - name: Cancel previous runs on the same branch
+      if: ${{ github.ref != 'refs/heads/main' }}
+      uses: styfle/cancel-workflow-action@0.12.0
+      with:
+        access_token: ${{ github.token }}
+
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        submodules: recursive
+
+    - name: Set git urls to https instead of ssh
+      run: |
+        git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v1.1
+      with:
+        msbuild-architecture: x64
+
+    - name: Set up MSVC Dev CMD vars
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+
+    - name: Create Build Environment
+      run: |
+        choco install ninja
+        cmake -E make_directory ${{github.workspace}}\build
+
+    - name: Configure CMake
+      run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE="Release"
+
+    - name: Build Windows binaries
+      run: |
+        cmake --build build -- -k0
+        ls ${{ github.workspace }}\build\
+
+    - name: Upload Windows binaries to artifacts
+      uses: actions/upload-artifact@v4.2.0
+      with:
+        name: chia-plot-sink
+        path: ${{ github.workspace }}\build\*.exe
+
+    - name: Get tag name
+      if: startsWith(github.ref, 'refs/tags/')
+      id: tag-name
+      run: |
+        echo "::set-output name=TAG_NAME::$(echo ${{ github.ref }} | cut -d'/' -f 3)"
+        echo "::set-output name=REPO_NAME::$(echo ${{ github.repository }} | cut -d'/' -f 2)"
