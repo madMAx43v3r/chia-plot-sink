@@ -27,12 +27,17 @@
 #include <cxxopts.hpp>
 #include <stdiox.hpp>
 
+#ifndef _WIN32
+#include <poll.h>
+#endif
+
 
 static std::string g_addr = "0.0.0.0";
 static int g_port = 1337;
 static int g_server = -1;
 static bool g_do_run = true;
 static bool g_force_shutdown = false;
+static int g_recv_timeout_ms = 10000;
 
 static std::mutex g_mutex;
 static std::condition_variable g_signal;
@@ -71,6 +76,43 @@ inline
 	}
 	::memcpy(&addr.sin_addr.s_addr, host->h_addr_list[0], host->h_length);
 	return addr;
+}
+
+inline
+void set_socket_nonblocking(int fd)
+{
+#ifdef _WIN32
+	u_long mode = 1;
+	const auto res = ::ioctlsocket(fd, FIONBIO, &mode);
+	if(res != 0){
+		throw std::runtime_error("ioctlsocket() failed with: " + get_socket_error_text());
+	}
+#else
+	const auto res = ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+	if(res < 0) {
+		throw std::runtime_error("fcntl() failed with: " + get_socket_error_text());
+	}
+#endif
+}
+
+inline
+int poll_fd_ex(const int fd, const int events, const int timeout_ms)
+{
+	::pollfd entry = {};
+	entry.fd = fd;
+	entry.events = events;
+#ifdef _WIN32
+	const auto ret = WSAPoll(&entry, 1, timeout_ms);
+	if(ret == SOCKET_ERROR) {
+		throw std::runtime_error("WSAPoll() failed with: " + get_socket_error_text());
+	}
+#else
+	const auto ret = ::poll(&entry, 1, timeout_ms);
+	if(ret < 0) {
+		throw std::runtime_error("poll() failed with: " + get_socket_error_text());
+	}
+#endif
+	return ret;
 }
 
 inline
@@ -134,12 +176,20 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 	}
 	const auto time_begin = get_time_millis();
 
-	char buffer[256 * 1024] = {};
 	size_t num_left = num_bytes;
+	std::vector<uint8_t> buffer(1024 * 1024);
+
+	set_socket_nonblocking(fd);
 
 	while(file && num_left)
 	{
-		const auto num_read = ::recv(fd, buffer, std::min<size_t>(num_left, sizeof(buffer)), 0);
+		if(!poll_fd_ex(fd, POLLIN, g_recv_timeout_ms))
+		{
+			std::lock_guard<std::mutex> lock(g_mutex);
+			std::cerr << "recv() failed with: timeout" << std::endl;
+			break;
+		}
+		const auto num_read = ::recv(fd, buffer.data(), std::min<size_t>(num_left, buffer.size()), 0);
 		if(num_read < 0) {
 			std::lock_guard<std::mutex> lock(g_mutex);
 			std::cerr << "recv() failed with: " << strerror(errno) << std::endl;
@@ -151,7 +201,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 		}
 		num_left -= num_read;
 
-		if(fwrite(buffer, 1, num_read, file) != num_read)
+		if(fwrite(buffer.data(), 1, num_read, file) != num_read)
 		{
 			std::lock_guard<std::mutex> lock(g_mutex);
 			std::cerr << "fwrite('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
@@ -354,7 +404,7 @@ int main(int argc, char** argv) try
 						if(!wait_counter++) {
 							std::cout << "Waiting for previous copy to finish or more space to become available ..." << std::endl;
 						}
-						g_signal.wait_for(lock, std::chrono::seconds(10));
+						g_signal.wait_for(lock, std::chrono::seconds(1));
 					}
 					if(!g_do_run) {
 						break;
