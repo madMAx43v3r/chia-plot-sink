@@ -37,7 +37,7 @@ static int g_port = 1337;
 static int g_server = -1;
 static bool g_do_run = true;
 static bool g_force_shutdown = false;
-static int g_recv_timeout_ms = 10000;
+static int g_recv_timeout_sec = 100;
 
 static std::mutex g_mutex;
 static std::condition_variable g_signal;
@@ -183,7 +183,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 
 	while(file && num_left)
 	{
-		if(!poll_fd_ex(fd, POLLIN, g_recv_timeout_ms))
+		if(!poll_fd_ex(fd, POLLIN, g_recv_timeout_sec * 1000))
 		{
 			std::lock_guard<std::mutex> lock(g_mutex);
 			std::cerr << "recv() failed with: timeout" << std::endl;
@@ -279,6 +279,7 @@ int main(int argc, char** argv) try
 	options.allow_unrecognised_options().add_options()(
 		"B, address", "Address to listen on (default = 0.0.0.0)", cxxopts::value<std::string>(g_addr))(
 		"p, port", "Port to listen on (default = 1337)", cxxopts::value<int>(g_port))(
+		"T, timeout", "Receive timeout [sec] (default = 100)", cxxopts::value<int>(g_recv_timeout_sec))(
 		"r, parallel", "Maximum number of parallel copies to same drive (default = 1, infinite = -1)", cxxopts::value<int>(max_num_active))(
 		"d, destination", "List of destination folders", cxxopts::value<std::vector<std::string>>(dir_list))(
 		"help", "Print help");
