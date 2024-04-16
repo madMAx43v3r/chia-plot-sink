@@ -1,0 +1,3 @@
+[submodule "mad-direct-io"]
+	path = mad-direct-io
+	url = https://github.com/madMAx43v3r/mad-direct-io.git

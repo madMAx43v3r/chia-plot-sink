@@ -29,6 +29,7 @@
 
 #ifndef _WIN32
 #include <poll.h>
+#include <mad/DirectFile.h>
 #endif
 
 
@@ -159,25 +160,45 @@ void trigger_shutdown(int sig)
 }
 
 static
-void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const std::string& dst_path, const std::string& file_name)
+void copy_func(const uint64_t job, const int fd, const uint64_t num_bytes, const std::string& dst_path, const std::string& file_name)
 {
 	const auto file_path = dst_path + (!dst_path.empty() && dst_path.back() != '/' ? "/" : "") + file_name;
 	const auto tmp_file_path = file_path + ".tmp";
 
 	bool is_drive_fail = false;
-	auto* file = fopen(tmp_file_path.c_str(), "wb");
+
+#ifdef _WIN32
+	auto file = fopen(tmp_file_path.c_str(), "wb");
+	if(!file) {
+		std::lock_guard<std::mutex> lock(g_mutex);
+		std::cerr << "fopen('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
+	}
+#else
+	std::shared_ptr<mad::DirectFile> file;
+	try {
+		file = std::make_shared<mad::DirectFile>(tmp_file_path, false, true, true);
+		file->auto_flush_bytes = 4 * 1024 * 1024;
+	} catch(const std::exception& ex) {
+		std::lock_guard<std::mutex> lock(g_mutex);
+		std::cerr << "open('" << tmp_file_path << "') failed with: " << ex.what() << std::endl;
+	}
+#endif
+
 	if(file) {
 		std::lock_guard<std::mutex> lock(g_mutex);
 		std::cout << "Started copy to " << file_path << " (" << num_bytes / pow(1024, 3) << " GiB)" << std::endl;
 	} else {
-		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cerr << "fopen('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
 		is_drive_fail = true;
 	}
 	const auto time_begin = get_time_millis();
 
-	size_t num_left = num_bytes;
-	std::vector<uint8_t> buffer(1024 * 1024);
+	uint64_t num_left = num_bytes;
+	std::vector<uint8_t> buffer(16 * 1024 * 1024);
+
+#ifndef _WIN32
+	uint64_t offset = 0;
+	mad::DirectFile::buffer_t write_buffer;
+#endif
 
 	set_socket_nonblocking(fd);
 
@@ -189,7 +210,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 			std::cerr << "recv() failed with: timeout" << std::endl;
 			break;
 		}
-		const auto num_read = ::recv(fd, buffer.data(), std::min<size_t>(num_left, buffer.size()), 0);
+		const auto num_read = ::recv(fd, buffer.data(), std::min<uint64_t>(num_left, buffer.size()), 0);
 		if(num_read < 0) {
 			std::lock_guard<std::mutex> lock(g_mutex);
 			std::cerr << "recv() failed with: " << strerror(errno) << std::endl;
@@ -201,6 +222,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 		}
 		num_left -= num_read;
 
+#ifdef _WIN32
 		if(fwrite(buffer.data(), 1, num_read, file) != num_read)
 		{
 			std::lock_guard<std::mutex> lock(g_mutex);
@@ -208,14 +230,38 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 			is_drive_fail = true;
 			break;
 		}
+#else
+		try {
+			file->write(buffer.data(), num_read, offset, write_buffer);
+		} catch(const std::exception& ex) {
+			std::lock_guard<std::mutex> lock(g_mutex);
+			std::cerr << "write('" << tmp_file_path << "') failed with: " << ex.what() << std::endl;
+			is_drive_fail = true;
+			break;
+		}
+		offset += num_read;
+#endif
 	}
 	CLOSESOCKET(fd);
 
-	if(file && fclose(file)) {
-		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cerr << "fclose('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
-		is_drive_fail = true;
+	if(file) {
+#ifdef _WIN32
+		if(fclose(file)) {
+			std::lock_guard<std::mutex> lock(g_mutex);
+			std::cerr << "fclose('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
+			is_drive_fail = true;
+		}
+#else
+		try {
+			file->close();
+		} catch(const std::exception& ex) {
+			std::lock_guard<std::mutex> lock(g_mutex);
+			std::cerr << "close('" << tmp_file_path << "') failed with: " << ex.what() << std::endl;
+			is_drive_fail = true;
+		}
+#endif
 	}
+
 	if(num_left) {
 		std::remove(tmp_file_path.c_str());
 		std::lock_guard<std::mutex> lock(g_mutex);
