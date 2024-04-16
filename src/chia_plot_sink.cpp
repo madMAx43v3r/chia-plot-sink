@@ -97,6 +97,17 @@ void set_socket_nonblocking(int fd)
 }
 
 inline
+void set_socket_options(int sock, int send_buffer_size, int receive_buffer_size)
+{
+	if(send_buffer_size > 0 && setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (char*)&send_buffer_size, sizeof(send_buffer_size)) < 0) {
+		throw std::runtime_error("setsockopt(SO_SNDBUF) failed with: " + get_socket_error_text());
+	}
+	if(receive_buffer_size > 0 && setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (char*)&receive_buffer_size, sizeof(receive_buffer_size)) < 0) {
+		throw std::runtime_error("setsockopt(SO_RCVBUF) failed with: " + get_socket_error_text());
+	}
+}
+
+inline
 int poll_fd_ex(const int fd, const int events, const int timeout_ms)
 {
 	::pollfd entry = {};
@@ -200,6 +211,13 @@ void copy_func(const uint64_t job, const int fd, const uint64_t num_bytes, const
 	mad::DirectFile::buffer_t write_buffer;
 #endif
 
+	try {
+		set_socket_options(fd, 0, buffer.size());
+	}
+	catch(const std::exception& ex) {
+		std::lock_guard<std::mutex> lock(g_mutex);
+		std::cerr << ex.what() << std::endl;
+	}
 	set_socket_nonblocking(fd);
 
 	while(file && num_left)
