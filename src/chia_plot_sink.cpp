@@ -177,7 +177,7 @@ void copy_func(const uint64_t job, const int fd, const uint64_t num_bytes, const
 	std::shared_ptr<mad::DirectFile> file;
 	try {
 		file = std::make_shared<mad::DirectFile>(tmp_file_path, false, true, true);
-		file->auto_flush_bytes = 4 * 1024 * 1024;
+		file->sequential_write = true;
 	} catch(const std::exception& ex) {
 		std::lock_guard<std::mutex> lock(g_mutex);
 		std::cerr << "open('" << tmp_file_path << "') failed with: " << ex.what() << std::endl;
