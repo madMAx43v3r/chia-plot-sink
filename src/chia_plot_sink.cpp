@@ -159,7 +159,7 @@ void trigger_shutdown(int sig)
 }
 
 static
-void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const std::string& dst_path, const std::string& file_name)
+void copy_func(const uint64_t job, const int fd, const uint64_t num_bytes, const std::string& dst_path, const std::string& file_name)
 {
 	const auto file_path = dst_path + (!dst_path.empty() && dst_path.back() != '/' ? "/" : "") + file_name;
 	const auto tmp_file_path = file_path + ".tmp";
@@ -176,8 +176,8 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 	}
 	const auto time_begin = get_time_millis();
 
-	size_t num_left = num_bytes;
-	std::vector<uint8_t> buffer(1024 * 1024);
+	uint64_t num_left = num_bytes;
+	std::vector<char> buffer(1024 * 1024);
 
 	set_socket_nonblocking(fd);
 
@@ -189,7 +189,7 @@ void copy_func(const uint64_t job, const int fd, const size_t num_bytes, const s
 			std::cerr << "recv() failed with: timeout" << std::endl;
 			break;
 		}
-		const auto num_read = ::recv(fd, buffer.data(), std::min<size_t>(num_left, buffer.size()), 0);
+		const auto num_read = ::recv(fd, buffer.data(), std::min<uint64_t>(num_left, buffer.size()), 0);
 		if(num_read < 0) {
 			std::lock_guard<std::mutex> lock(g_mutex);
 			std::cerr << "recv() failed with: " << strerror(errno) << std::endl;
