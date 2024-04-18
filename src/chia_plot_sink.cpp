@@ -112,9 +112,6 @@ int poll_fd_ex(const int fd, const int events, const int timeout_ms)
 		throw std::runtime_error("poll() failed with: " + get_socket_error_text());
 	}
 #endif
-	if(entry.revents & POLLHUP) {
-		throw std::runtime_error("client closed connection");
-	}
 	return ret;
 }
 
@@ -410,7 +407,10 @@ int main(int argc, char** argv) try
 						}
 						g_signal.wait_for(lock, std::chrono::seconds(1));
 
-						poll_fd_ex(fd, 0, 0);	// check if connection still alive
+						// check if connection still alive
+						if(poll_fd_ex(fd, POLLIN, 0)) {
+							throw std::runtime_error("connection closed");
+						}
 					}
 					if(!g_do_run) {
 						break;
