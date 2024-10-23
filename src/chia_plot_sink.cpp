@@ -168,7 +168,7 @@ void copy_func(const uint64_t job, const int fd, const uint64_t num_bytes, const
 	auto* file = fopen(tmp_file_path.c_str(), "wb");
 	if(file) {
 		std::lock_guard<std::mutex> lock(g_mutex);
-		std::cout << "Started copy to " << file_path << " (" << num_bytes / pow(1024, 3) << " GiB)" << std::endl;
+		std::cout << "Started copy to " << file_path << " (" << float(num_bytes / pow(1024, 3)) << " GiB)" << std::endl;
 	} else {
 		std::lock_guard<std::mutex> lock(g_mutex);
 		std::cerr << "fopen('" << tmp_file_path << "') failed with: " << strerror(errno) << std::endl;
@@ -403,7 +403,8 @@ int main(int argc, char** argv) try
 					}
 					if(!out) {
 						if(!wait_counter++) {
-							std::cout << "Waiting for previous copy to finish or more space to become available ..." << std::endl;
+							std::cout << "Waiting for previous copy to finish or more space ("
+									<< float(file_size / pow(1024, 3)) << " GiB) to become available ... " << std::endl;
 						}
 						g_signal.wait_for(lock, std::chrono::seconds(1));
 
